@@ -1,10 +1,18 @@
 import { lookup } from "https://deno.land/x/mrmime@v1.0.1/mod.ts";
+import { load as loadEnv } from "https://deno.land/std@0.180.0/dotenv/mod.ts";
 import { assert } from "./helper.ts";
 import { exportSettings, getChangedWithin, importSettings } from "./effect.ts";
 
+interface GeneratedFile {
+	read?: () => string,
+	readProtected?: boolean,
+	write?: (body: string) => void,
+	writeProtected?: boolean
+}
+
+const sitePassword = (await loadEnv())["PASSWORD"].toLowerCase();
 const server = Deno.listen({ port: 8088 });
-const generatedFiles: Map<string,
-	{ read?: () => string, write?: (body: string) => void }> = new Map();
+const generatedFiles: Map<string, GeneratedFile> = new Map();
 export const networkOptions: Map<string, any> = new Map();
 
 export async function init() {
@@ -12,15 +20,18 @@ export async function init() {
 		read() {
 			return JSON.stringify(exportSettings());
 		},
+		readProtected: true,
 		write(file) {
 			importSettings(JSON.parse(file));
-		}
+		},
+		writeProtected: true
 	});
 
 	generatedFiles.set("/changedEffects.json", {
 		read() {
 			return JSON.stringify(getChangedWithin(1000));
-		}
+		},
+		readProtected: true,
 	});
 
 	generatedFiles.set("/networkOptions.json", {
@@ -29,7 +40,8 @@ export async function init() {
 			for (const key in options) {
 				networkOptions.set(key, options[key]);
 			}
-		}
+		},
+		writeProtected: true
 	});
 
 	for await (const conn of server) serveHttp(conn);
@@ -53,14 +65,21 @@ async function serveRequest({ request, respondWith }: Deno.RequestEvent) {
 		urlpath = "/index.html";
 
 	const mimeType = lookup(urlpath) ?? "";
+	const generatedFile = generatedFiles.get(urlpath);
 
 	if (request.method === "GET") {
-		const reader = generatedFiles.get(urlpath)?.read;
+		const reader = generatedFile?.read;
 
 		let file: BodyInit;
-		if (reader) {
+		if (generatedFile?.read) {
+			if (generatedFile?.readProtected) {
+				if (!checkRequestProtection({ request, respondWith })) {
+					await responseCode(respondWith, 401);
+					return;
+				}
+			}
 			try {
-				file = reader();
+				file = generatedFile.read();
 			} catch {
 				await responseCode(respondWith, 500);
 				return;
@@ -80,10 +99,15 @@ async function serveRequest({ request, respondWith }: Deno.RequestEvent) {
 			await respondWith(response);
 		} catch { }
 	} else if (request.method === "PUT") {
-		const writer = generatedFiles.get(urlpath)?.write;
-		if (writer) {
+		if (generatedFile?.write) {
+			if (generatedFile.writeProtected) {
+				if (!checkRequestProtection({ request, respondWith })) {
+					await responseCode(respondWith, 401);
+					return;
+				}
+			}
 			try {
-				writer(await request.text());
+				generatedFile.write(await request.text());
 			} catch {
 				await responseCode(respondWith, 500);
 				return;
@@ -107,10 +131,30 @@ async function serveRequest({ request, respondWith }: Deno.RequestEvent) {
 	}
 }
 
+function checkRequestProtection({ request, respondWith }: Deno.RequestEvent): boolean {
+	safePath: {
+		const cookies = request.headers.get("Cookie");
+		if (cookies === null) break safePath;
+
+		const cookie = cookies
+			.split("; ")
+			.find((row) => row.startsWith("wrensRoomLightsPassword="));
+		if (cookie === undefined) break safePath;
+
+		const cookiePassword = atob(cookie.split("=").splice(1).join(""));
+		if (sitePassword !== cookiePassword.toLowerCase()) break safePath;
+
+		return true;
+	}
+
+	return false;
+}
+
 async function responseCode(respondWith: (r: Response | Promise<Response>) => Promise<void>, status: number) {
 	const body = {
 		200: "200: OK",
 		400: "400: Bad Request",
+		401: "401 Unauthorized",
 		404: "404: Not Found",
 		405: "405: Method Not Allowed",
 		500: "500: Internal Server Error"

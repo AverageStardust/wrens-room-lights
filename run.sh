@@ -1,1 +1,1 @@
-sudo nohup deno run --allow-net --allow-read --allow-write --allow-run index.ts &
+sudo nohup deno run --allow-net --allow-read --allow-write --allow-run --allow-env index.ts &

@@ -1,9 +1,9 @@
 import { init as initUI } from "./ui.js";
 import { update as updateEffects } from "./effect.js";
-import { securityCheck } from "./security.js";
+import { getUserPassword } from "./password.js";
 
 async function init() {
-	if(!await securityCheck()) return;
+	getUserPassword();
 
 	await initUI();
 
