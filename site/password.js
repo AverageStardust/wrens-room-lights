@@ -3,12 +3,13 @@ export function getUserPassword() {
 
 	while (password === null || password.length < 1) {
 		password = prompt("What is the password?");
-		setCookie("wrensRoomLightsPassword", password);
 	}
+	
+	setCookie("wrensRoomLightsPassword", password);
 }
 
 function setCookie(name, value) {
-	document.cookie = `${name}=${btoa(value)}; expires=Fri, 31 Dec 9999 23:59:59 GMT`; 
+	document.cookie = `${name}=${btoa(value)}; expires=${new Date(Date.now() + 1000 * 86400 * 7)}`; 
 }
 
 function getCookie(name) {
